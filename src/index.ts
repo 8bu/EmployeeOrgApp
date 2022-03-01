@@ -50,6 +50,8 @@ export default class EmployeeOrgApp implements IEmployeeOrgApp {
   public move(eId: number, sId: number): void {
     if (eId === this.ceo.uniqueId)
       throw new Error('You cannot do that with the CEO, mate!')
+    if (eId === sId)
+      throw new Error('Employee cannot supervise themselves, mate!')
 
     // Before execute any move, assume that we have undo several times.
     // So we check if your previous action is not the last item in history
@@ -63,17 +65,34 @@ export default class EmployeeOrgApp implements IEmployeeOrgApp {
     }
 
     const { supervisor: cachedSupervisor } = this.findIdOrThrow(eId)
+    const {
+      employee: {
+        subordinates: cachedEmployeeSubordinates,
+      },
+    } = this.findIdOrThrow(eId)
 
-    const _move = (_eId: number, _sId: number): void => {
+    /**
+     * Move employee to new supervisor
+     * @param _eId Employee ID
+     * @param _sId Supervisor ID
+     * @param wholeBranch Whether to move whole branch or just employee
+     */
+    const _move = (_eId: number, _sId: number, wholeBranch = false): void => {
       const _employeePosition = this.findIdOrThrow(_eId)
       const _supervisorPosition = this.findIdOrThrow(_sId)
 
-      const { employee, supervisor: currentSupervisor } = _employeePosition
-      const targetSupervisor = _supervisorPosition.employee
-      currentSupervisor.subordinates = currentSupervisor.subordinates.filter(
-        e => !(e.uniqueId === _eId),
-      )
-      targetSupervisor.subordinates.push(employee)
+      // We don't need to do anything if the employee is already in the same supervisor
+      if (_employeePosition.supervisor.uniqueId !== _sId) {
+        const { employee, supervisor: currentSupervisor } = _employeePosition
+        const nextSupervisor = _supervisorPosition.employee
+        // Remove employee from current supervisor
+        // Subordinates of that employee will be moved to the new supervisor as well
+        currentSupervisor.subordinates = currentSupervisor.subordinates.filter(
+          e => !(e.uniqueId === _eId),
+        ).concat(wholeBranch ? [] : employee.subordinates)
+        if (!wholeBranch) employee.subordinates = []
+        nextSupervisor.subordinates.push(employee)
+      }
     }
 
     const exec = () => {
@@ -84,6 +103,10 @@ export default class EmployeeOrgApp implements IEmployeeOrgApp {
     // In this case, we restore the previous supervisor
     const undo = () => {
       _move(eId, cachedSupervisor.uniqueId)
+      // Giving back subordinates to the employee
+      cachedEmployeeSubordinates.forEach((sub) => {
+        _move(sub.uniqueId, eId, true)
+      })
     }
 
     const action: UndoableAction = {
